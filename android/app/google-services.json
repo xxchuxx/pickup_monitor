@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "652662656997",
+    "project_id": "pickup-monitor-aaba3",
+    "storage_bucket": "pickup-monitor-aaba3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:652662656997:android:3573d47cb8ebf66da6a90c",
+        "android_client_info": {
+          "package_name": "com.example.pickup_monitor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAC91NWpzJAWUjkZ5gVYHDc2Ad4t3lnKBU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
