@@ -1,1 +1,27 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"pickup-monitor-aaba3","appId":"1:652662656997:android:3573d47cb8ebf66da6a90c","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"pickup-monitor-aaba3","configurations":{"android":"1:652662656997:android:3573d47cb8ebf66da6a90c"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "pickup-monitor-aaba3",
+          "appId": "1:652662656997:android:3573d47cb8ebf66da6a90c",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "pickup-monitor-aaba3",
+          "configurations": {
+            "android": "1:652662656997:android:3573d47cb8ebf66da6a90c"
+          }
+        }
+      }
+    }
+  }
+}

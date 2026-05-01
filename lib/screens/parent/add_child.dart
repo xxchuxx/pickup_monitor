@@ -1,6 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../../services/audit_log_service.dart';
+import '../../services/image_upload_service.dart';
+import '../../services/section_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_components.dart';
+import '../../widgets/photo_upload_field.dart';
 
 class AddChild extends StatefulWidget {
   const AddChild({super.key});
@@ -14,63 +21,98 @@ class _AddChildState extends State<AddChild> {
   final ageController = TextEditingController();
 
   String? selectedSection;
+  PickedUploadImage? childPhoto;
   bool isLoading = false;
 
-  static const List<String> _sections = [
-    'Section A',
-    'Section B',
-    'Section C',
-    'Section D',
-  ];
+  Future<void> _pickChildPhoto() async {
+    final image = await ImageUploadService.pickImage();
+    if (image == null || !mounted) return;
+    setState(() => childPhoto = image);
+  }
 
   Future<void> saveChild() async {
-    if (nameController.text.isEmpty ||
-        ageController.text.isEmpty ||
+    if (nameController.text.trim().isEmpty ||
+        ageController.text.trim().isEmpty ||
         selectedSection == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all fields'),
-        ),
-      );
+      _showSnack('Please fill in all fields', isError: true);
+      return;
+    }
+    if (childPhoto == null) {
+      _showSnack("Please upload the child's photo", isError: true);
       return;
     }
 
     setState(() => isLoading = true);
 
     try {
-      await FirebaseFirestore.instance.collection('children').add({
-        'name': nameController.text.trim(),
-        'age': ageController.text.trim(),
-        'section': selectedSection,
-        'parentId': FirebaseAuth.instance.currentUser!.uid,
-        'status': 'pending',
-        'createdAt': Timestamp.now(),
-      });
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final parentDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final parentData = parentDoc.data() ?? {};
+      final photoUrl = await ImageUploadService.uploadPickedImage(
+        image: childPhoto!,
+        ownerId: uid,
+        category: 'children',
+      );
+
+      final childRef = await FirebaseFirestore.instance
+          .collection('children')
+          .add({
+            'name': nameController.text.trim(),
+            'age': ageController.text.trim(),
+            'section': selectedSection,
+            'parentId': uid,
+            'parentName': parentData['name'] ?? '',
+            'parentEmail': parentData['email'] ?? '',
+            'parentPhone': parentData['phone'] ?? '',
+            'photoUrl': photoUrl,
+            'status': 'pending',
+            'createdAt': Timestamp.now(),
+          });
+
+      await AuditLogService.record(
+        action: 'child.submit',
+        targetType: 'child',
+        targetId: childRef.id,
+        details: {
+          'name': nameController.text.trim(),
+          'section': selectedSection,
+        },
+      );
 
       nameController.clear();
       ageController.clear();
 
+      if (!mounted) return;
       setState(() {
         selectedSection = null;
+        childPhoto = null;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Child submitted! Waiting for admin approval.',
-          ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showSnack('Child submitted for approval', isError: false);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-        ),
-      );
+      if (!mounted) return;
+      _showSnack('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
+  }
 
-    setState(() => isLoading = false);
+  void _showSnack(String message, {required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? AppPalette.danger : AppPalette.success,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    ageController.dispose();
+    super.dispose();
   }
 
   @override
@@ -78,252 +120,223 @@ class _AddChildState extends State<AddChild> {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF5B7FD4),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF4A6BC0),
-        title: const Text(
-          'Add Child',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        iconTheme: const IconThemeData(
-          color: Colors.white,
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+      appBar: AppBar(title: const Text('Add Child')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
+            AppCard(
+              padding: const EdgeInsets.all(18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    "Child's Information",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                  const AppSectionTitle(
+                    title: "Child's Information",
+                    subtitle: 'New children remain pending until approved',
                   ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Submitted children require admin approval before appearing in the class list.',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
+                  PhotoUploadField(
+                    title: "Child's photo *",
+                    subtitle:
+                        'This appears during teacher pickup verification.',
+                    image: childPhoto,
+                    onPick: _pickChildPhoto,
+                    onRemove: () => setState(() => childPhoto = null),
+                    icon: Icons.child_care_outlined,
+                    color: AppPalette.teal,
                   ),
-                  const SizedBox(height: 16),
-
-                  /// Child Name
+                  const SizedBox(height: 12),
                   TextField(
                     controller: nameController,
-                    decoration: InputDecoration(
-                      labelText: "Child's Full Name",
-                      prefixIcon: const Icon(Icons.child_care),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: "Child's full name",
+                      prefixIcon: Icon(Icons.child_care_outlined),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  /// Age
                   TextField(
                     controller: ageController,
                     keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
                       labelText: 'Age',
-                      prefixIcon: const Icon(Icons.cake),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                      prefixIcon: Icon(Icons.cake_outlined),
                     ),
                   ),
-
                   const SizedBox(height: 12),
+                  StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: SectionService.streamSections(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return const SizedBox(
+                          height: 56,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
 
-                  /// Section Dropdown
-                  DropdownButtonFormField<String>(
-                    value: selectedSection,
-                    decoration: InputDecoration(
-                      labelText: 'Section',
-                      prefixIcon: const Icon(Icons.class_),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    items: _sections
-                        .map(
-                          (section) => DropdownMenuItem(
-                            value: section,
-                            child: Text(section),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        selectedSection = value;
-                      });
+                      if (snapshot.hasError) {
+                        return InfoBanner(
+                          icon: Icons.error_outline,
+                          message: 'Unable to load sections: ${snapshot.error}',
+                          color: AppPalette.danger,
+                        );
+                      }
+
+                      final sections = SectionService.sectionNamesFromDocs(
+                        snapshot.data?.docs ?? const [],
+                      );
+                      final currentValue = sections.contains(selectedSection)
+                          ? selectedSection
+                          : null;
+
+                      return DropdownButtonFormField<String>(
+                        key: ValueKey(currentValue),
+                        initialValue: currentValue,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Section',
+                          prefixIcon: Icon(Icons.class_outlined),
+                        ),
+                        items: sections
+                            .map(
+                              (section) => DropdownMenuItem(
+                                value: section,
+                                child: Text(section),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) => setState(() {
+                          selectedSection = value;
+                        }),
+                      );
                     },
                   ),
-
-                  const SizedBox(height: 20),
-
-                  /// Submit Button
+                  const SizedBox(height: 18),
                   SizedBox(
                     width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       onPressed: isLoading ? null : saveChild,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4A6BC0),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: isLoading
-                          ? const CircularProgressIndicator(
-                              color: Colors.white,
+                      icon: isLoading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
                             )
-                          : const Text(
-                              'Submit for Approval',
-                              style: TextStyle(fontSize: 15),
-                            ),
+                          : const Icon(Icons.send_outlined),
+                      label: Text(
+                        isLoading ? 'Submitting' : 'Submit for approval',
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 22),
+            const AppSectionTitle(title: 'My Children'),
+            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('children')
+                  .where('parentId', isEqualTo: uid)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SizedBox(
+                    height: 160,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
 
-            const SizedBox(height: 20),
+                if (snapshot.hasError) {
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: 'Unable to load children',
+                    message: '${snapshot.error}',
+                  );
+                }
 
-            /// Child List
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('children')
-                    .where('parentId', isEqualTo: uid)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                      ),
-                    );
-                  }
+                final children = snapshot.data?.docs ?? [];
 
-                  final children = snapshot.data!.docs;
+                if (children.isEmpty) {
+                  return const SizedBox(
+                    height: 180,
+                    child: AppEmptyState(
+                      icon: Icons.child_care_outlined,
+                      title: 'No children added yet',
+                    ),
+                  );
+                }
 
-                  if (children.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        'No children added yet.',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    );
-                  }
+                return Column(
+                  children: children.map((child) {
+                    final data = child.data();
+                    final name = (data['name'] ?? 'Unknown').toString();
+                    final age = (data['age'] ?? '').toString();
+                    final section = (data['section'] ?? '').toString();
+                    final status = (data['status'] ?? 'pending').toString();
+                    final color = _statusColor(status);
 
-                  return ListView.builder(
-                    itemCount: children.length,
-                    itemBuilder: (context, index) {
-                      final child = children[index];
-                      final status =
-                          child['status'] ?? 'pending';
-
-                      return Container(
-                        margin: const EdgeInsets.only(
-                          bottom: 10,
-                        ),
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: AppCard(
                         padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius:
-                              BorderRadius.circular(12),
-                        ),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.child_friendly,
-                              color: Color(0xFF4A6BC0),
+                            InitialsAvatar(
+                              name: name,
+                              color: AppPalette.primary,
                             ),
                             const SizedBox(width: 12),
-
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    child['name'],
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold,
+                                      color: AppPalette.ink,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
                                     ),
                                   ),
                                   Text(
-                                    'Age: ${child['age']} | Section: ${child['section']}',
+                                    'Age $age - $section',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      color: Colors.grey,
+                                      color: AppPalette.muted,
                                       fontSize: 12,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-
-                            Container(
-                              padding:
-                                  const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: status == 'approved'
-                                    ? Colors.green.shade50
-                                    : status == 'rejected'
-                                        ? Colors.red.shade50
-                                        : Colors.orange.shade50,
-                                borderRadius:
-                                    BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                status.toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight:
-                                      FontWeight.bold,
-                                  color: status ==
-                                          'approved'
-                                      ? Colors.green
-                                      : status ==
-                                              'rejected'
-                                          ? Colors.red
-                                          : Colors.orange,
-                                ),
-                              ),
+                            StatusPill(
+                              label: status.toUpperCase(),
+                              color: color,
                             ),
                           ],
                         ),
-                      );
-                    },
-                  );
-                },
-              ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
             ),
           ],
         ),
       ),
     );
+  }
+
+  Color _statusColor(String status) {
+    if (status == 'approved') return AppPalette.success;
+    if (status == 'rejected') return AppPalette.danger;
+    return AppPalette.amber;
   }
 }

@@ -1,8 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'confirm_pickup.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../../services/pickup_flow_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_components.dart';
+import 'confirm_pickup.dart';
 
 class ScanQr extends StatefulWidget {
   const ScanQr({super.key});
@@ -13,27 +18,217 @@ class ScanQr extends StatefulWidget {
 
 class _ScanQrState extends State<ScanQr> {
   bool isProcessing = false;
+  bool isTorchOn = false;
   final MobileScannerController cameraController = MobileScannerController();
 
   Future<void> handleScan(String scannedData) async {
     if (isProcessing) return;
     setState(() => isProcessing = true);
 
-    // Split "token|yyyy-MM-dd"
     final parts = scannedData.split('|');
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    if (parts.length != 2) {
-      _showError('Invalid QR code.');
+    if (parts.length == 3 && parts[0] == 'pickup_request') {
+      await _handlePickupRequestScan(parts[1], parts[2], today);
       return;
     }
 
-    final scannedToken = parts[0];
-    final scannedDate  = parts[1];
-    final today        = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    if (parts.length == 2) {
+      await _handleGuardianTokenScan(parts[0], parts[1], today);
+      return;
+    }
 
-    // Check date first
+    _showError('Invalid QR code.');
+  }
+
+  String _firstString(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = (data[key] ?? '').toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  List<String> get _photoKeys => const [
+    'photoUrl',
+    'imageUrl',
+    'profilePhotoUrl',
+    'pictureUrl',
+    'avatarUrl',
+  ];
+
+  Future<void> _handlePickupRequestScan(
+    String requestId,
+    String scannedDate,
+    String today,
+  ) async {
     if (scannedDate != today) {
-      _showError('This QR code has expired.\nAsk the parent for today\'s code.');
+      _showError('This pickup request has expired.');
+      return;
+    }
+
+    try {
+      final teacherId = FirebaseAuth.instance.currentUser?.uid;
+      if (teacherId == null) {
+        _showError('Please sign in again before scanning.');
+        return;
+      }
+
+      final firestore = FirebaseFirestore.instance;
+      final teacherDoc = await firestore
+          .collection('users')
+          .doc(teacherId)
+          .get();
+      if (!mounted) return;
+
+      final assignedSection = (teacherDoc.data()?['assignedSection'] ?? '')
+          .toString();
+      if (assignedSection.isEmpty) {
+        _showError('No section is assigned to your account.');
+        return;
+      }
+
+      final requestDoc = await firestore
+          .collection('pickupRequests')
+          .doc(requestId)
+          .get();
+      if (!mounted) return;
+
+      if (!requestDoc.exists) {
+        _showError('Pickup request not found.');
+        return;
+      }
+
+      final request = requestDoc.data() ?? {};
+      final requestSection = (request['section'] ?? '').toString();
+      if (requestSection != assignedSection) {
+        _showError('This pickup request is for another section.');
+        return;
+      }
+
+      final status = (request['status'] ?? '').toString();
+      if (status != 'pending' && status != 'acknowledged') {
+        _showError('This pickup request is no longer active.');
+        return;
+      }
+
+      final childId = request['childId']?.toString();
+      final parentId = request['parentId']?.toString();
+      if (childId == null || childId.isEmpty) {
+        _showError('This pickup request is missing child information.');
+        return;
+      }
+      if (parentId == null || parentId.isEmpty) {
+        _showError('This pickup request is missing parent information.');
+        return;
+      }
+
+      final childDoc = await firestore
+          .collection('children')
+          .doc(childId)
+          .get();
+      if (!mounted) return;
+
+      final child = childDoc.data() ?? {};
+      if (!childDoc.exists || child['status'] != 'approved') {
+        _showError('This child is not approved for pickup yet.');
+        return;
+      }
+
+      if ((child['section'] ?? '').toString() != requestSection) {
+        _showError('This pickup request does not match the child section.');
+        return;
+      }
+
+      final pickupType = (request['pickupByType'] ?? 'parent').toString();
+      var pickupIdentityId = 'pickup_request_$requestId';
+      var pickupName = (request['pickupByName'] ?? 'Pickup person').toString();
+      var relation = (request['pickupByRelation'] ?? 'Parent').toString();
+      var pickupPhotoUrl = _firstString(request, [
+        'pickupByPhotoUrl',
+        'guardianPhotoUrl',
+        'parentPhotoUrl',
+      ]);
+      final childPhotoUrlFromRequest = _firstString(request, [
+        'childPhotoUrl',
+        'childImageUrl',
+        'childProfilePhotoUrl',
+        'childPictureUrl',
+      ]);
+
+      if (pickupType == 'guardian') {
+        final guardianId = request['guardianId']?.toString();
+        if (guardianId == null || guardianId.isEmpty) {
+          _showError('This pickup request is missing guardian information.');
+          return;
+        }
+
+        final guardianDoc = await firestore
+            .collection('guardians')
+            .doc(guardianId)
+            .get();
+        if (!mounted) return;
+
+        final guardian = guardianDoc.data() ?? {};
+        if (!guardianDoc.exists ||
+            guardian['active'] != true ||
+            guardian['revokedByAdmin'] == true ||
+            guardian['childId'] != childId ||
+            guardian['parentId'] != parentId) {
+          _showError('This guardian is not authorized for this child.');
+          return;
+        }
+
+        pickupIdentityId = guardianId;
+        pickupName = (guardian['name'] ?? pickupName).toString();
+        relation = (guardian['relation'] ?? relation).toString();
+        pickupPhotoUrl = _firstString(guardian, _photoKeys);
+      }
+
+      try {
+        await PickupFlowService.assertCanRelease(
+          childId: childId,
+          guardianId: pickupIdentityId,
+        );
+      } on PickupFlowException catch (e) {
+        if (!mounted) return;
+        _showError(e.message);
+        return;
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ConfirmPickup(
+            guardianId: pickupIdentityId,
+            guardianName: pickupName,
+            relation: relation,
+            childName: (request['childName'] ?? child['name'] ?? 'Child')
+                .toString(),
+            parentId: parentId,
+            childId: childId,
+            section: requestSection,
+            guardianPhotoUrl: pickupPhotoUrl,
+            childPhotoUrl: childPhotoUrlFromRequest.isNotEmpty
+                ? childPhotoUrlFromRequest
+                : _firstString(child, _photoKeys),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnack(context, 'Error: $e', type: AppFeedbackType.error);
+      setState(() => isProcessing = false);
+    }
+  }
+
+  Future<void> _handleGuardianTokenScan(
+    String scannedToken,
+    String scannedDate,
+    String today,
+  ) async {
+    if (scannedDate != today) {
+      _showError('This QR code has expired.');
       return;
     }
 
@@ -44,39 +239,94 @@ class _ScanQrState extends State<ScanQr> {
           .where('active', isEqualTo: true)
           .get();
 
+      if (!mounted) return;
+
       if (result.docs.isEmpty) {
         _showError('This person is not on the authorized pickup list.');
-      } else {
-        final guardian = result.docs.first.data();
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ConfirmPickup(
-              guardianName: guardian['name'],
-              relation: guardian['relation'],
-              childName: guardian['childName'],
-            ),
-          ),
-        );
+        return;
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+
+      final guardian = result.docs.first.data();
+      final guardianId = result.docs.first.id;
+      final childId = guardian['childId']?.toString();
+      final parentId = guardian['parentId']?.toString();
+
+      if (guardian['revokedByAdmin'] == true) {
+        _showError('This guardian access was removed by an admin.');
+        return;
+      }
+
+      if (parentId == null || parentId.isEmpty) {
+        _showError('This guardian record is missing parent information.');
+        return;
+      }
+
+      if (childId == null || childId.isEmpty) {
+        _showError('This guardian record is missing child information.');
+        return;
+      }
+
+      final childDoc = await FirebaseFirestore.instance
+          .collection('children')
+          .doc(childId)
+          .get();
+      final child = childDoc.data() ?? {};
+
+      if (child['status'] != 'approved') {
+        if (!mounted) return;
+        _showError('This child is not approved for pickup yet.');
+        return;
+      }
+
+      try {
+        await PickupFlowService.assertCanRelease(
+          childId: childId,
+          guardianId: guardianId,
+        );
+      } on PickupFlowException catch (e) {
+        if (!mounted) return;
+        _showError(e.message);
+        return;
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ConfirmPickup(
+            guardianId: guardianId,
+            guardianName: (guardian['name'] ?? 'Guardian').toString(),
+            relation: (guardian['relation'] ?? '').toString(),
+            childName: (guardian['childName'] ?? '').toString(),
+            parentId: parentId,
+            childId: childId,
+            section: child['section']?.toString(),
+            guardianPhotoUrl: _firstString(guardian, _photoKeys),
+            childPhotoUrl: _firstString(child, _photoKeys),
+          ),
+        ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnack(context, 'Error: $e', type: AppFeedbackType.error);
       setState(() => isProcessing = false);
     }
+  }
+
+  Future<void> _toggleTorch() async {
+    await cameraController.toggleTorch();
+    if (!mounted) return;
+    setState(() => isTorchOn = !isTorchOn);
   }
 
   void _showError(String message) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.red.shade50,
         title: const Row(
           children: [
-            Icon(Icons.cancel, color: Colors.red),
+            Icon(Icons.cancel_outlined, color: AppPalette.danger),
             SizedBox(width: 8),
-            Text('Not Authorized', style: TextStyle(color: Colors.red)),
+            Text('Not Authorized'),
           ],
         ),
         content: Text(message),
@@ -84,7 +334,7 @@ class _ScanQrState extends State<ScanQr> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() => isProcessing = false);
+              if (mounted) setState(() => isProcessing = false);
             },
             child: const Text('OK'),
           ),
@@ -94,59 +344,116 @@ class _ScanQrState extends State<ScanQr> {
   }
 
   @override
+  void dispose() {
+    cameraController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF5B7FD4),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF4A6BC0),
-        title: const Text('Scan Guardian QR',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: const Color(0xFF4A6BC0),
-            child: const Text(
-              'Point the camera at the guardian\'s QR code',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: MobileScanner(
-              controller: cameraController,
-              onDetect: (capture) {
-                final code = capture.barcodes.first.rawValue;
-                if (code != null) handleScan(code);
-              },
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              color: const Color(0xFF4A6BC0),
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+      appBar: AppBar(title: const Text('Scan Pickup QR')),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
                 children: [
-                  Icon(Icons.qr_code_scanner, color: Colors.white, size: 32),
-                  SizedBox(height: 8),
-                  Text('Waiting for QR code...',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 4),
-                  Text('Make sure the QR code is well lit',
-                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  AppIconBox(
+                    icon: isProcessing
+                        ? Icons.hourglass_top
+                        : Icons.qr_code_scanner,
+                    color: isProcessing ? AppPalette.amber : AppPalette.teal,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isProcessing ? 'Checking QR code' : 'Ready to scan',
+                          style: const TextStyle(
+                            color: AppPalette.ink,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Pickup request verification',
+                          style: TextStyle(
+                            color: AppPalette.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: isTorchOn ? 'Turn flash off' : 'Turn flash on',
+                    onPressed: _toggleTorch,
+                    icon: Icon(
+                      isTorchOn ? Icons.flash_on : Icons.flash_off,
+                      color: isTorchOn ? AppPalette.amber : AppPalette.muted,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Switch camera',
+                    onPressed: cameraController.switchCamera,
+                    icon: const Icon(Icons.cameraswitch_outlined),
+                    color: AppPalette.muted,
+                  ),
                 ],
               ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      MobileScanner(
+                        controller: cameraController,
+                        onDetect: (capture) {
+                          final code = capture.barcodes.first.rawValue;
+                          if (code != null) handleScan(code);
+                        },
+                      ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppPalette.teal, width: 2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      Center(
+                        child: Container(
+                          width: 240,
+                          height: 240,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white, width: 3),
+                          ),
+                        ),
+                      ),
+                      if (isProcessing)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

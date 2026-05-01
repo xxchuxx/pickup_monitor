@@ -1,197 +1,111 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../../theme/app_theme.dart';
+import '../../widgets/app_components.dart';
+import '../login_screen.dart';
 import 'add_child.dart';
 import 'add_guardian.dart';
-import 'view_qr.dart';
 import 'pickup_history.dart';
-import '../login_screen.dart';
+import 'start_pickup.dart';
 
 class ParentHome extends StatelessWidget {
   const ParentHome({super.key});
+
+  Future<void> _signOut(BuildContext context) async {
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: 'Sign out',
+      message: 'Return to the login screen?',
+      confirmLabel: 'Sign out',
+      type: AppFeedbackType.warning,
+    );
+    if (!confirmed) return;
+
+    await FirebaseAuth.instance.signOut();
+    if (!context.mounted) return;
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
 
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF5B7FD4),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header with real child count
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              color: const Color(0xFF4A6BC0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Welcome back,',
-                      style: TextStyle(
-                          color: Colors.white70, fontSize: 13)),
-                  const Text('Parent',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('children')
-                        .where('parentId', isEqualTo: uid)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      final count = snapshot.hasData
-                          ? snapshot.data!.docs.length
-                          : 0;
-                      return Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.child_care,
-                                color: Colors.white, size: 32),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                const Text('My Children',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold)),
-                                Text('$count registered',
-                                    style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            // Menu
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    menuCard(
-                        Icons.baby_changing_station,
-                        'Add Child',
-                        'Register a new child',
-                        Colors.blue.shade50,
-                        () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const AddChild()))),
-                    const SizedBox(height: 10),
-                    menuCard(
-                        Icons.person_add,
-                        'Add Guardian',
-                        'Manage authorized pickups',
-                        Colors.green.shade50,
-                        () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const AddGuardian()))),
-                    const SizedBox(height: 10),
-                    menuCard(
-                        Icons.qr_code,
-                        'View QR Codes',
-                        'Guardian QR codes',
-                        Colors.pink.shade50,
-                        () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const ViewQrCodes()))),
-                    const SizedBox(height: 10),
-                    menuCard(
-                        Icons.history,
-                        'Pickup History',
-                        'View past pickups',
-                        Colors.orange.shade50,
-                        () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    const PickupHistory()))),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          await FirebaseAuth.instance.signOut();
-                          Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const LoginScreen()));
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: const Text('Logout'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('Parent Portal'),
+        actions: [
+          IconButton(
+            tooltip: 'Sign out',
+            onPressed: () => _signOut(context),
+            icon: const Icon(Icons.logout),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
-    );
-  }
-
-  Widget menuCard(IconData icon, String title, String subtitle,
-      Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: Colors.grey.shade700),
+            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('children')
+                  .where('parentId', isEqualTo: uid)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                final count = snapshot.data?.docs.length ?? 0;
+                return AppMetricCard(
+                  icon: Icons.child_care_outlined,
+                  label: 'Registered children',
+                  value: '$count',
+                  color: AppPalette.primary,
+                );
+              },
             ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14)),
-                Text(subtitle,
-                    style: const TextStyle(
-                        color: Colors.grey, fontSize: 12)),
-              ],
+            const SizedBox(height: 22),
+            const AppSectionTitle(title: 'Quick Actions'),
+            AppActionTile(
+              icon: Icons.directions_walk_outlined,
+              title: 'Start Pickup',
+              subtitle: 'Tell the teacher who is coming for your child',
+              accentColor: AppPalette.success,
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const StartPickup())),
             ),
-            const Spacer(),
-            const Icon(Icons.arrow_forward_ios,
-                size: 14, color: Colors.grey),
+            const SizedBox(height: 10),
+            AppActionTile(
+              icon: Icons.person_add_alt_1_outlined,
+              title: 'Add Child',
+              subtitle: 'Submit a student enrollment request',
+              accentColor: AppPalette.primary,
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const AddChild())),
+            ),
+            const SizedBox(height: 10),
+            AppActionTile(
+              icon: Icons.group_add_outlined,
+              title: 'Add Guardian',
+              subtitle: 'Create an authorized pickup profile',
+              accentColor: AppPalette.teal,
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const AddGuardian())),
+            ),
+            const SizedBox(height: 10),
+            AppActionTile(
+              icon: Icons.history_outlined,
+              title: 'Pickup History',
+              subtitle: 'Review completed releases',
+              accentColor: AppPalette.amber,
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const PickupHistory())),
+            ),
           ],
         ),
       ),

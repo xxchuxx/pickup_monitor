@@ -1,152 +1,364 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
+import '../../services/pickup_flow_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_components.dart';
 
 class ConfirmPickup extends StatelessWidget {
+  final String guardianId;
   final String guardianName;
   final String relation;
   final String childName;
+  final String parentId;
+  final String childId;
+  final String? section;
+  final String? guardianPhotoUrl;
+  final String? childPhotoUrl;
 
   const ConfirmPickup({
     super.key,
+    required this.guardianId,
     required this.guardianName,
     required this.relation,
     required this.childName,
+    required this.parentId,
+    required this.childId,
+    this.section,
+    this.guardianPhotoUrl,
+    this.childPhotoUrl,
   });
+
+  Future<void> _releaseChild(BuildContext context) async {
+    final confirmed = await _showReleasePreviewDialog(context);
+
+    if (!confirmed) return;
+
+    try {
+      await PickupFlowService.releaseChild(
+        guardianId: guardianId,
+        guardianName: guardianName,
+        relation: relation,
+        childId: childId,
+        childName: childName,
+        parentId: parentId,
+        section: section,
+      );
+
+      if (!context.mounted) return;
+      showAppSnack(
+        context,
+        'Child released successfully',
+        type: AppFeedbackType.success,
+      );
+
+      Navigator.popUntil(context, (route) => route.isFirst);
+    } on PickupFlowException catch (e) {
+      if (!context.mounted) return;
+      showAppSnack(context, e.message, type: AppFeedbackType.warning);
+    } catch (e) {
+      if (!context.mounted) return;
+      showAppSnack(context, 'Error: $e', type: AppFeedbackType.error);
+    }
+  }
+
+  Future<bool> _showReleasePreviewDialog(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Final release check'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const InfoBanner(
+                icon: Icons.verified_user_outlined,
+                message:
+                    'Verify the pickup person and child before completing the release.',
+                color: AppPalette.success,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
+                children: [
+                  _ReleaseIdentityCard(
+                    label: 'Pickup person',
+                    name: guardianName,
+                    subtitle: relation,
+                    photoUrl: guardianPhotoUrl,
+                    color: AppPalette.primary,
+                    icon: Icons.person_pin_circle_outlined,
+                  ),
+                  _ReleaseIdentityCard(
+                    label: 'Child',
+                    name: childName,
+                    subtitle: section?.isNotEmpty == true
+                        ? section!
+                        : 'Student',
+                    photoUrl: childPhotoUrl,
+                    color: AppPalette.teal,
+                    icon: Icons.child_care_outlined,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppPalette.success,
+            ),
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('Release child'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed ?? false;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF5B7FD4),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF4A6BC0),
-        title: const Text('Confirm Pickup',
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
+      appBar: AppBar(title: const Text('Confirm Pickup')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: AppConstrained(
+              maxWidth: 520,
+              alignment: Alignment.center,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.check_circle,
-                      color: Colors.green, size: 80),
-                  const SizedBox(height: 16),
-                  const Text('AUTHORIZED',
-                      style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green,
-                          letterSpacing: 2)),
-                  const SizedBox(height: 24),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  AppCard(
+                    padding: const EdgeInsets.all(22),
                     child: Column(
                       children: [
-                        const Icon(Icons.person,
-                            size: 48, color: Color(0xFF4A6BC0)),
-                        const SizedBox(height: 8),
-                        Text(guardianName,
-                            style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold)),
-                        Text(relation,
-                            style: const TextStyle(
-                                color: Colors.grey, fontSize: 14)),
-                        const Divider(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        const AppIconBox(
+                          icon: Icons.verified_user_outlined,
+                          color: AppPalette.success,
+                          size: 64,
+                        ),
+                        const SizedBox(height: 14),
+                        const Text(
+                          'Authorized Pickup',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppPalette.ink,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const StatusPill(
+                          label: 'VERIFIED',
+                          color: AppPalette.success,
+                        ),
+                        const SizedBox(height: 22),
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 14,
+                          alignment: WrapAlignment.center,
                           children: [
-                            const Icon(Icons.child_care,
-                                color: Colors.blue, size: 20),
-                            const SizedBox(width: 8),
-                            Text('Picking up: $childName',
-                                style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w500)),
+                            _ReleaseIdentityCard(
+                              label: 'Pickup person',
+                              name: guardianName,
+                              subtitle: relation,
+                              photoUrl: guardianPhotoUrl,
+                              color: AppPalette.primary,
+                              icon: Icons.person_pin_circle_outlined,
+                            ),
+                            _ReleaseIdentityCard(
+                              label: 'Child',
+                              name: childName,
+                              subtitle: section?.isNotEmpty == true
+                                  ? section!
+                                  : 'Student',
+                              photoUrl: childPhotoUrl,
+                              color: AppPalette.teal,
+                              icon: Icons.child_care_outlined,
+                            ),
                           ],
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _releaseChild(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppPalette.success,
+                      ),
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text('Release child'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Cancel'),
+                    ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: () async {
-                  try {
-                    await FirebaseFirestore.instance
-                        .collection('pickupLogs')
-                        .add({
-                      'childName': childName,
-                      'guardianName': guardianName,
-                      'relation': relation,
-                      'parentId': FirebaseAuth.instance.currentUser!.uid,
-                      'timestamp': FieldValue.serverTimestamp(),
-                    });
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Child released successfully!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-
-               Navigator.popUntil(context, (route) => route.isFirst);
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: $e')),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text('Release Child',
-                    style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text('Cancel'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _ReleaseIdentityCard extends StatelessWidget {
+  final String label;
+  final String name;
+  final String subtitle;
+  final String? photoUrl;
+  final Color color;
+  final IconData icon;
+
+  const _ReleaseIdentityCard({
+    required this.label,
+    required this.name,
+    required this.subtitle,
+    required this.photoUrl,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 132,
+      child: Column(
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppPalette.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _ReleasePhoto(
+            name: name,
+            photoUrl: photoUrl,
+            color: color,
+            icon: icon,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            name,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppPalette.ink,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppPalette.muted, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReleasePhoto extends StatelessWidget {
+  final String name;
+  final String? photoUrl;
+  final Color color;
+  final IconData icon;
+
+  const _ReleasePhoto({
+    required this.name,
+    required this.photoUrl,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanUrl = (photoUrl ?? '').trim();
+
+    return Container(
+      width: 96,
+      height: 96,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.16)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: cleanUrl.isEmpty
+          ? _PhotoFallback(name: name, icon: icon, color: color)
+          : Image.network(
+              cleanUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  _PhotoFallback(name: name, icon: icon, color: color),
+            ),
+    );
+  }
+}
+
+class _PhotoFallback extends StatelessWidget {
+  final String name;
+  final IconData icon;
+  final Color color;
+
+  const _PhotoFallback({
+    required this.name,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        InitialsAvatar(name: name, color: color, radius: 32),
+        Positioned(
+          right: 8,
+          bottom: 8,
+          child: Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppPalette.border),
+            ),
+            child: Icon(icon, size: 15, color: color),
+          ),
+        ),
+      ],
     );
   }
 }
