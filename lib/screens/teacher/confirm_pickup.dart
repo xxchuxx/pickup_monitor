@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../services/pickup_flow_service.dart';
@@ -305,6 +308,7 @@ class _ReleasePhoto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cleanUrl = (photoUrl ?? '').trim();
+    final inlineBytes = _inlineImageBytes(cleanUrl);
 
     return Container(
       width: 96,
@@ -317,6 +321,13 @@ class _ReleasePhoto extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: cleanUrl.isEmpty
           ? _PhotoFallback(name: name, icon: icon, color: color)
+          : inlineBytes != null
+          ? Image.memory(
+              inlineBytes,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  _PhotoFallback(name: name, icon: icon, color: color),
+            )
           : Image.network(
               cleanUrl,
               fit: BoxFit.cover,
@@ -324,6 +335,20 @@ class _ReleasePhoto extends StatelessWidget {
                   _PhotoFallback(name: name, icon: icon, color: color),
             ),
     );
+  }
+
+  Uint8List? _inlineImageBytes(String url) {
+    final match = RegExp(
+      r'^data:image/[^;]+;base64,(.+)$',
+      caseSensitive: false,
+    ).firstMatch(url);
+    if (match == null) return null;
+
+    try {
+      return base64Decode(match.group(1)!);
+    } on FormatException {
+      return null;
+    }
   }
 }
 

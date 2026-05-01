@@ -91,6 +91,9 @@ class _AddChildState extends State<AddChild> {
         childPhoto = null;
       });
       _showSnack('Child submitted for approval', isError: false);
+    } on ImageUploadException catch (e) {
+      if (!mounted) return;
+      _showSnack(e.message, isError: true);
     } catch (e) {
       if (!mounted) return;
       _showSnack('Error: $e', isError: true);

@@ -109,6 +109,9 @@ class _AddGuardianState extends State<AddGuardian> {
       });
 
       _showSnack('Guardian added successfully', isError: false);
+    } on ImageUploadException catch (e) {
+      if (!mounted) return;
+      _showSnack(e.message, isError: true);
     } catch (e) {
       if (!mounted) return;
       _showSnack('Error: $e', isError: true);

@@ -135,6 +135,11 @@ class _StartPickupState extends State<StartPickup> {
                 'photoUrl': pickupByPhotoUrl,
                 'updatedAt': FieldValue.serverTimestamp(),
               });
+        } else if (pickupOption.type == 'parent') {
+          await firestore.collection('users').doc(uid).update({
+            'photoUrl': pickupByPhotoUrl,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
         }
       }
       if (pickupByPhotoUrl.isEmpty) {
@@ -191,6 +196,9 @@ class _StartPickupState extends State<StartPickup> {
         'Teacher notified for $childName.',
         type: AppFeedbackType.success,
       );
+    } on ImageUploadException catch (e) {
+      if (!mounted) return;
+      showAppSnack(context, e.message, type: AppFeedbackType.error);
     } catch (e) {
       if (!mounted) return;
       showAppSnack(context, 'Error: $e', type: AppFeedbackType.error);
