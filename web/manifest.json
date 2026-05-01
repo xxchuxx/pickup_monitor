@@ -1,13 +1,20 @@
 {
-    "name": "pickup_monitor",
-    "short_name": "pickup_monitor",
-    "start_url": ".",
+    "name": "Pickup Monitor",
+    "short_name": "Pickup",
+    "id": "./",
+    "start_url": "./",
+    "scope": "./",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F8FAFC",
+    "theme_color": "#2563EB",
+    "description": "School pickup monitoring, QR verification, and parent-teacher release tracking.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": [
+        "education",
+        "productivity",
+        "utilities"
+    ],
     "icons": [
         {
             "src": "icons/Icon-192.png",

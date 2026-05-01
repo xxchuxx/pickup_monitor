@@ -18,21 +18,52 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="School pickup monitoring, QR verification, and parent-teacher release tracking.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2563EB">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="pickup_monitor">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pickup Monitor">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>pickup_monitor</title>
+  <title>Pickup Monitor</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    window.pickupMonitorInstallPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      window.pickupMonitorInstallPrompt = event;
+      window.dispatchEvent(new Event('pickup-monitor-install-ready'));
+    });
+
+    window.addEventListener('appinstalled', () => {
+      window.pickupMonitorInstallPrompt = null;
+      window.dispatchEvent(new Event('pickup-monitor-installed'));
+    });
+
+    window.pickupMonitorCanInstall = () => {
+      return window.pickupMonitorInstallPrompt !== null;
+    };
+
+    window.pickupMonitorPromptInstall = async () => {
+      const promptEvent = window.pickupMonitorInstallPrompt;
+      if (!promptEvent) return false;
+
+      promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      window.pickupMonitorInstallPrompt = null;
+      return choice.outcome === 'accepted';
+    };
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

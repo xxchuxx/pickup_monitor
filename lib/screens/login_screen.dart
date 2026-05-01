@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/pwa_install_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/input_validators.dart';
 import '../widgets/app_components.dart';
@@ -22,6 +25,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final passwordController = TextEditingController();
   bool showPassword = false;
   bool isLoading = false;
+  bool canInstallPwa = false;
+  Timer? installCheckTimer;
   int selectedPreviewIndex = 0;
 
   static const List<_FeatureStep> _landingFeatures = [
@@ -90,6 +95,44 @@ class _LoginScreenState extends State<LoginScreen> {
           (selectedPreviewIndex + delta + _pickupFlow.length) %
           _pickupFlow.length;
     });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startInstallAvailabilityChecks();
+  }
+
+  void _startInstallAvailabilityChecks() {
+    _refreshInstallAvailability();
+    var attempts = 0;
+    installCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      attempts++;
+      _refreshInstallAvailability();
+      if (canInstallPwa || attempts >= 12) {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _refreshInstallAvailability() {
+    final available = PwaInstallService.canInstall;
+    if (!mounted || available == canInstallPwa) return;
+    setState(() => canInstallPwa = available);
+  }
+
+  Future<void> _installPwa() async {
+    final accepted = await PwaInstallService.promptInstall();
+    if (!mounted) return;
+
+    setState(() => canInstallPwa = PwaInstallService.canInstall);
+    showAppSnack(
+      context,
+      accepted
+          ? 'Pickup Monitor installation started.'
+          : 'Use the browser install option when it appears.',
+      type: accepted ? AppFeedbackType.success : AppFeedbackType.info,
+    );
   }
 
   Future<void> login() async {
@@ -169,6 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    installCheckTimer?.cancel();
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
@@ -413,6 +457,14 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         const SizedBox(height: 14),
+        if (canInstallPwa) ...[
+          OutlinedButton.icon(
+            onPressed: _installPwa,
+            icon: const Icon(Icons.install_desktop_outlined),
+            label: const Text('Install app'),
+          ),
+          const SizedBox(height: 10),
+        ],
         ElevatedButton.icon(
           onPressed: () => setState(() => showLoginForm = true),
           icon: const Icon(Icons.login),
